@@ -229,5 +229,158 @@ app.get("/tweets/:tweetId/", authenticateToken, async (request, response) => {
   `;
   const tweetWithStats = await db.all(getTweetQuery);
 
-  response.send(tweetWithStats);
+  const getLikesQuery = `
+  SELECT
+    COUNT(tweet_id) AS likes
+  FROM
+    like
+  WHERE
+    tweet_id = ${tweetId};
+  `;
+  const tweetLikes = await db.get(getLikesQuery);
+
+  const getReplyCountQuery = `
+  SELECT
+    COUNT(tweet_id) AS replies
+  FROM
+    reply
+  WHERE
+    tweet_id = ${tweetId};
+  `;
+  const tweetReplies = await db.get(getReplyCountQuery);
+
+  if (tweetWithStats === undefined) {
+    response.status(401);
+    response.send("Invalid Request");
+  } else {
+    response.send({
+      tweet: tweetWithStats.tweet,
+      likes: tweetLikes.likes,
+      replies: tweetReplies.replies,
+      dateTime: tweetWithStats.dateTime,
+    });
+  }
+});
+
+//API to get likes for specific tweet
+app.get(
+  "/tweets/:tweetId/likes/",
+  authenticateToken,
+  async (request, response) => {
+    let { username } = request;
+    let { tweetId } = request.params;
+
+    const getLoggedUser = `
+  SELECT
+    *
+  FROM
+    user
+  WHERE
+    user.username = '${username}'
+  `;
+    const dbUser = await db.get(getLoggedUser);
+
+    const getLikesOfTweetQuery = `
+    SELECT 
+        user.username
+    FROM 
+        (follower INNER JOIN user ON
+        follower.following_user_id = user.user_id) AS T
+        INNER JOIN like ON
+        T.user_id = like.user_id
+    WHERE
+        follower.follower_user_id = ${dbUser.user_id} 
+        AND like.tweet_id = ${tweetId};
+  `;
+    const likedPerson = await db.all(getLikesOfTweetQuery);
+
+    if (likedPerson === undefined) {
+      response.status(401);
+      response.send("Invalid Request");
+    } else {
+      response.send({
+        likes: likedPerson.map((user) => user.username),
+      });
+    }
+  }
+);
+
+//API for the user requests a tweet of a user he is following, return the list of replies
+app.get(
+  "/tweets/:tweetId/replies/",
+  authenticateToken,
+  async (request, response) => {
+    let { username } = request;
+    let { tweetId } = request.params;
+
+    const getLoggedUser = `
+  SELECT
+    *
+  FROM
+    user
+  WHERE
+    user.username = '${username}'
+  `;
+    const dbUser = await db.get(getLoggedUser);
+
+    const getLikesOfTweetQuery = `
+    SELECT 
+        user.username AS name,
+        reply.reply 
+    FROM 
+        (follower INNER JOIN user ON
+        follower.following_user_id = user.user_id) AS T
+        INNER JOIN reply ON
+        T.user_id = reply.user_id
+    WHERE
+        follower.follower_user_id = ${dbUser.user_id} 
+        AND reply.tweet_id = ${tweetId};
+  `;
+    const repliedPerson = await db.all(getLikesOfTweetQuery);
+    if (repliedPerson === undefined) {
+      response.status(401);
+      response.send("Invalid Request");
+    } else {
+      response.send({
+        replies: repliedPerson,
+      });
+    }
+  }
+);
+
+//API for returns a list of all tweets of the user
+app.get("/user/tweets/", authenticateToken, async (request, response) => {
+  let { username } = request;
+
+  const getLoggedUser = `
+  SELECT
+    *
+  FROM
+    user
+  WHERE
+    user.username = '${username}'
+  `;
+  const dbUser = await db.get(getLoggedUser);
+
+  const getUserTweetsQuery = `
+  SELECT 
+    tweet.tweet,
+    COUNT(T.tweet_id) AS likes,
+    COUNT(reply.tweet_id) AS replies,
+    tweet.date_time AS dateTime
+    FROM
+        (tweet INNER JOIN like ON
+        tweet.tweet_id = like.tweet_id) AS T
+        INNER JOIN reply ON
+        T.tweet_id = reply.tweet_id
+    WHERE
+            T.user_id = ${dbUser.user_id}
+
+    GROUP BY 
+            tweet.tweet_id;
+            `;
+  const allTweets = await db.all(getUserTweetsQuery);
+
+  response.send(allTweets);
+  
 });
